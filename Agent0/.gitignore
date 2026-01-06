@@ -1,0 +1,8 @@
+models/
+generated_question/
+fea_experiments/
+test_files/
+agent0env/
+
+*.out
+*.err
