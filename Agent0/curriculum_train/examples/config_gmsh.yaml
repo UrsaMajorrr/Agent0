@@ -1,0 +1,89 @@
+data:
+  train_files: ./utils/geometry_train.parquet
+  val_files: ./utils/geometry_val.parquet
+  prompt_key: geometry_code  # Any existing column - Jinja gets all columns via **example
+  answer_key: geometry_code  # Passed to reward function
+  max_prompt_length: 2048
+  max_response_length: 4096  # Longer for task + optional script
+  rollout_batch_size: 256
+  val_batch_size: 512
+  format_prompt: ./examples/format_prompt/gmsh_meshing.jinja
+  override_chat_template: null
+  shuffle: true
+  seed: 1
+  filter_overlong_prompts: true
+
+algorithm:
+  adv_estimator: grpo
+  disable_kl: false
+  use_kl_loss: true
+  kl_penalty: low_var_kl
+  kl_coef: 1.0e-2
+  mock_data: test
+
+worker:
+  actor:
+    global_batch_size: 128
+    micro_batch_size_per_device_for_update: 2
+    micro_batch_size_per_device_for_experience: 8
+    max_grad_norm: 1.0
+    padding_free: true
+    ulysses_sequence_parallel_size: 1
+    model:
+      model_path: Qwen/Qwen2.5-7B-Instruct
+      enable_gradient_checkpointing: true
+      trust_remote_code: false
+      freeze_vision_tower: false
+    optim:
+      lr: 1.0e-6
+      weight_decay: 1.0e-2
+      strategy: adamw
+      lr_warmup_ratio: 0.0
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: false
+      enable_rank0_init: true
+    offload:
+      offload_params: true
+      offload_optimizer: true
+
+  rollout:
+    n: 4  # Generate 4 task candidates per geometry (needed for GRPO)
+    temperature: 0.8  # Diverse task generation
+    top_p: 0.95
+    gpu_memory_utilization: 0.7
+    enforce_eager: false
+    enable_chunked_prefill: false
+    tensor_parallel_size: 2
+    val_override_config:
+      temperature: 0.8
+      n: 1
+
+  ref:
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: true
+      enable_rank0_init: true
+    offload:
+      offload_params: true
+
+  reward:
+    reward_type: batch
+    reward_function: ./examples/reward_function/gmsh_curriculum_reward.py:compute_score
+
+trainer:
+  total_epochs: 1000
+  max_steps: null
+  project_name: gmsh_curriculum
+  experiment_name: qwen2_5_7b_gmsh_curriculum_programmatic
+  logger: []
+  nnodes: 1
+  n_gpus_per_node: 8
+  val_freq: 10
+  val_before_train: false
+  val_only: false
+  val_generations_to_log: 3
+  save_freq: 50
+  save_limit: 5
+  save_checkpoint_path: ./checkpoints/gmsh_curriculum
+  load_checkpoint_path: null

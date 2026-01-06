@@ -75,7 +75,7 @@ if not correct_data:
         json.dump([], f)
     exit()
 
-questions = [item["question"] for item in correct_data]
+questions = [item["task"] for item in correct_data]
 answers = [item["answer"] for item in correct_data]
 print(f"[{args.suffix}] Found {len(questions)} questions to process.")
 

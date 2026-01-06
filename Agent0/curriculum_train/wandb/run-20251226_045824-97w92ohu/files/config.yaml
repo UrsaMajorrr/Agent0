@@ -1,0 +1,232 @@
+_wandb:
+    value:
+        cli_version: 0.20.1
+        m: []
+        python_version: 3.12.0
+        t:
+            "1":
+                - 1
+                - 5
+                - 11
+                - 30
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 95
+                - 105
+            "2":
+                - 1
+                - 5
+                - 11
+                - 30
+                - 41
+                - 49
+                - 51
+                - 53
+                - 71
+                - 95
+                - 105
+            "3":
+                - 2
+                - 13
+                - 16
+                - 55
+                - 61
+            "4": 3.12.0
+            "5": 0.20.1
+            "6": 4.52.4
+            "12": 0.20.1
+            "13": linux-x86_64
+algorithm:
+    value:
+        adv_estimator: grpo
+        disable_kl: false
+        gamma: 1
+        kl_coef: 0.01
+        kl_horizon: 0
+        kl_penalty: low_var_kl
+        kl_target: 0
+        kl_type: fixed
+        lam: 1
+        mock_data: test
+        use_kl_loss: true
+data:
+    value:
+        answer_key: answer
+        filter_overlong_prompts: true
+        format_prompt: /home/kade/Agent0_backup/Agent0/curriculum_train/examples/format_prompt/questioner.jinja
+        image_key: images
+        max_pixels: 4194304
+        max_prompt_length: 2048
+        max_response_length: 4096
+        min_pixels: 262144
+        override_chat_template: null
+        prompt_key: problem
+        rollout_batch_size: 8
+        seed: 1
+        shuffle: true
+        train_files: hiyouga/math12k@train
+        val_batch_size: 1024
+        val_files: hiyouga/math12k@test
+trainer:
+    value:
+        critic_warmup: 0
+        experiment_name: qwen3_4b_curriculum_v1
+        load_checkpoint_path: null
+        logger:
+            - console
+            - wandb
+        max_steps: 6
+        n_gpus_per_node: 4
+        nnodes: 1
+        project_name: agent0
+        save_checkpoint_path: /home/kade/Agent0_backup/Agent0/models/qwen3_4b_curriculum_v1
+        save_freq: 1
+        save_limit: 3
+        total_epochs: 1000
+        val_before_train: false
+        val_freq: -1
+        val_generations_to_log: 3
+        val_only: false
+worker:
+    value:
+        actor:
+            clip_ratio_dual: 3
+            clip_ratio_high: 0.3
+            clip_ratio_low: 0.2
+            disable_kl: false
+            fsdp:
+                enable_cpu_offload: false
+                enable_full_shard: true
+                enable_rank0_init: true
+                fsdp_size: -1
+                mp_buffer_dtype: fp32
+                mp_param_dtype: bf16
+                mp_reduce_dtype: fp32
+                torch_dtype: null
+                use_orig_params: false
+            global_batch_size: 4
+            global_batch_size_per_device: -1
+            kl_coef: 0.01
+            kl_penalty: low_var_kl
+            max_grad_norm: 1
+            micro_batch_size_per_device_for_experience: 8
+            micro_batch_size_per_device_for_update: 2
+            model:
+                enable_gradient_checkpointing: true
+                freeze_vision_tower: false
+                model_path: Qwen/Qwen3-4B-Base
+                tokenizer_path: Qwen/Qwen3-4B-Base
+                trust_remote_code: false
+            offload:
+                offload_optimizer: true
+                offload_params: true
+            optim:
+                betas:
+                    - 0.9
+                    - 0.999
+                lr: 1e-06
+                lr_warmup_ratio: 0
+                min_lr_ratio: null
+                strategy: adamw
+                training_steps: 6
+                warmup_style: constant
+                weight_decay: 0.01
+            padding_free: true
+            ppo_epochs: 1
+            strategy: fsdp
+            ulysses_sequence_parallel_size: 1
+            use_kl_loss: true
+            use_torch_compile: true
+        critic:
+            cliprange_value: 0.5
+            fsdp:
+                enable_cpu_offload: false
+                enable_full_shard: true
+                enable_rank0_init: false
+                fsdp_size: -1
+                mp_buffer_dtype: fp32
+                mp_param_dtype: bf16
+                mp_reduce_dtype: fp32
+                torch_dtype: null
+                use_orig_params: false
+            global_batch_size: 256
+            global_batch_size_per_device: -1
+            max_grad_norm: 1
+            micro_batch_size_per_device_for_experience: 16
+            micro_batch_size_per_device_for_update: 4
+            model:
+                enable_gradient_checkpointing: true
+                freeze_vision_tower: false
+                model_path: null
+                tokenizer_path: null
+                trust_remote_code: true
+            offload:
+                offload_optimizer: false
+                offload_params: false
+            optim:
+                betas:
+                    - 0.9
+                    - 0.999
+                lr: 1e-06
+                lr_warmup_ratio: 0
+                min_lr_ratio: null
+                strategy: adamw
+                training_steps: 6
+                warmup_style: constant
+                weight_decay: 0.01
+            padding_free: false
+            ppo_epochs: 1
+            strategy: fsdp
+            ulysses_sequence_parallel_size: 1
+        hybrid_engine: true
+        ref:
+            fsdp:
+                enable_cpu_offload: true
+                enable_full_shard: true
+                enable_rank0_init: true
+                fsdp_size: -1
+                mp_buffer_dtype: fp32
+                mp_param_dtype: bf16
+                mp_reduce_dtype: fp32
+                torch_dtype: null
+                use_orig_params: false
+            micro_batch_size_per_device_for_experience: 8
+            offload:
+                offload_optimizer: false
+                offload_params: true
+            padding_free: true
+            strategy: fsdp
+            ulysses_sequence_parallel_size: 1
+            use_torch_compile: true
+        reward:
+            num_cpus: 1
+            reward_function: /home/kade/Agent0_backup/Agent0/curriculum_train/examples/reward_function/curriculum_reward.py
+            reward_function_name: compute_score
+            reward_type: batch
+            skip_special_tokens: true
+        rollout:
+            disable_log_stats: true
+            dtype: bf16
+            enable_chunked_prefill: false
+            enforce_eager: false
+            gpu_memory_utilization: 0.7
+            ignore_eos: false
+            limit_images: 0
+            max_model_len: null
+            max_num_batched_tokens: 8192
+            "n": 4
+            name: vllm
+            prompt_length: 2048
+            response_length: 4096
+            seed: 1
+            temperature: 1
+            tensor_parallel_size: 2
+            top_k: -1
+            top_p: 0.99
+            trust_remote_code: false
+            val_override_config:
+                "n": 1
+                temperature: 1

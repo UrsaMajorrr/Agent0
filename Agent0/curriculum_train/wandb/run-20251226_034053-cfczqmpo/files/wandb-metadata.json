@@ -1,0 +1,171 @@
+{
+  "os": "Linux-6.11.0-26-generic-x86_64-with-glibc2.39",
+  "python": "CPython 3.12.0",
+  "startedAt": "2025-12-26T03:40:53.992399Z",
+  "args": [
+    "--node-ip-address=172.26.134.66",
+    "--node-manager-port=37289",
+    "--object-store-name=/tmp/ray/session_2025-12-26_03-38-54_574884_2561937/sockets/plasma_store",
+    "--raylet-name=/tmp/ray/session_2025-12-26_03-38-54_574884_2561937/sockets/raylet",
+    "--redis-address=None",
+    "--metrics-agent-port=59372",
+    "--logging-rotate-bytes=536870912",
+    "--logging-rotate-backup-count=5",
+    "--runtime-env-agent-port=59015",
+    "--gcs-address=172.26.134.66:48411",
+    "--session-name=session_2025-12-26_03-38-54_574884_2561937",
+    "--temp-dir=/tmp/ray",
+    "--webui=127.0.0.1:8265",
+    "--cluster-id=47ed06a08c4d1e3118d3e7b193e9f4d71af4e8efd28c9de733907825",
+    "--startup-token=16",
+    "--worker-launch-time-ms=1766720338989",
+    "--node-id=e22953d9bf10df6c4fcc3be442440895240c015a7f98548d48a878ef",
+    "--runtime-env-hash=-115784934",
+    "--enable-resource-isolation=false"
+  ],
+  "program": "/home/kade/miniconda3/envs/curriculum/lib/python3.12/site-packages/ray/_private/workers/default_worker.py",
+  "git": {
+    "remote": "https://github.com/UrsaMajorrr/Agent0.git",
+    "commit": "84ecbaf9189f5e854e4660a8091915301abd0ddb"
+  },
+  "email": "kade@p-1.ai",
+  "root": "/home/kade/Agent0_backup/Agent0/curriculum_train",
+  "host": "p-1-cluster-node-006",
+  "executable": "/home/kade/miniconda3/envs/curriculum/bin/python3",
+  "cpu_count": 104,
+  "cpu_count_logical": 208,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "gpu_count": 8,
+  "disk": {
+    "/": {
+      "total": "23430704340992",
+      "used": "338787250176"
+    }
+  },
+  "memory": {
+    "total": "1902327980032"
+  },
+  "cpu": {
+    "count": 104,
+    "countLogical": 208
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-6a2215d8-051c-d379-22cd-8ac1a32269e1"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-b66d12f8-a684-c494-c087-cf248bfabb2b"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-cec9c5e1-0770-0283-3f13-2d9ad257ca64"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-106fc506-bdf9-aa06-5449-5d313dbb23a3"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-488b055b-8119-a540-97d9-39b6cc3226ad"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-4eef39ae-641a-bc12-0be8-4bb62a128f4e"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-88e2a8c6-08f6-53ed-f7d2-78d801cc6d94"
+    },
+    {
+      "name": "NVIDIA H100 80GB HBM3",
+      "memoryTotal": "85520809984",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-b56409ab-c031-610d-c6bf-ba1df45a1ba8"
+    }
+  ],
+  "slurm": {
+    "cluster_name": "cluster",
+    "conf": "/var/spool/slurmd/conf-cache/slurm.conf",
+    "cpu_bind": "quiet,mask_cpu:0x00000000000000FFFFFFFFFFFF00000000000000FFFFFFFFFFFF",
+    "cpu_bind_list": "0x00000000000000FFFFFFFFFFFF00000000000000FFFFFFFFFFFF",
+    "cpu_bind_type": "mask_cpu:",
+    "cpu_bind_verbose": "quiet",
+    "cpus_on_node": "96",
+    "gpus": "8",
+    "gpus_on_node": "8",
+    "gtids": "0",
+    "job_account": "kade",
+    "job_cpus_per_node": "96",
+    "job_end_time": "1798253652",
+    "job_gid": "10002",
+    "job_group": "kade",
+    "job_id": "992",
+    "job_name": "bash",
+    "job_nodelist": "p-1-cluster-node-006",
+    "job_num_nodes": "1",
+    "job_partition": "standard",
+    "job_qos": "normal",
+    "job_start_time": "1766717652",
+    "job_uid": "10002",
+    "job_user": "kade",
+    "jobid": "992",
+    "launch_node_ipaddr": "172.26.132.214",
+    "localid": "0",
+    "mpi_type": "pmix",
+    "nnodes": "1",
+    "nodeid": "0",
+    "nodelist": "p-1-cluster-node-006",
+    "nprocs": "1",
+    "ntasks": "1",
+    "oom_kill_step": "0",
+    "pmix_mapping_serv": "(vector,(0,1,1))",
+    "pmixp_abort_agent_port": "35097",
+    "prio_process": "0",
+    "procid": "0",
+    "pty_port": "45637",
+    "pty_win_col": "213",
+    "pty_win_row": "64",
+    "srun_comm_host": "172.26.132.214",
+    "srun_comm_port": "33849",
+    "step_gpus": "0,1,2,3,4,5,6,7",
+    "step_id": "0",
+    "step_launcher_port": "33849",
+    "step_nodelist": "p-1-cluster-node-006",
+    "step_num_nodes": "1",
+    "step_num_tasks": "1",
+    "step_tasks_per_node": "1",
+    "stepid": "0",
+    "submit_dir": "/home/kade",
+    "submit_host": "p-1-cluster-login-001",
+    "task_pid": "2542552",
+    "tasks_per_node": "1",
+    "topology_addr": "p-1-cluster-node-006",
+    "topology_addr_pattern": "node",
+    "umask": "0002"
+  },
+  "cudaVersion": "12.8"
+}

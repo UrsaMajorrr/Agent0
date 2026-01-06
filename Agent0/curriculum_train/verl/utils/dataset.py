@@ -32,6 +32,49 @@ from . import torch_functional as VF
 
 import json
 import random
+import os
+
+# Load geometry metadata for curriculum training
+def load_geometry_metadata(metadata_path: str = None) -> list:
+    """Load geometry metadata from JSON file."""
+    if metadata_path is None:
+        # Default path relative to this file
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        metadata_path = os.path.join(base_dir, "utils", "metadata_all.json")
+
+    if os.path.exists(metadata_path):
+        with open(metadata_path, "r") as f:
+            data = json.load(f)
+            return data.get("metadata", [])
+    return []
+
+
+def format_geometry_for_prompt(geom_meta: dict) -> str:
+    """Format geometry metadata into a prompt string for the curriculum agent."""
+    filepath = geom_meta["file"]
+    filename = os.path.basename(filepath)
+
+    # Summarize surface types
+    entity_types = geom_meta.get("entity_types", {})
+    type_counts = {}
+    for surf_id, surf_type in entity_types.items():
+        type_counts[surf_type] = type_counts.get(surf_type, 0) + 1
+    type_summary = ", ".join([f"{count} {t}" for t, count in sorted(type_counts.items())])
+
+    return (
+        f"**GEOMETRY FILE:** {filename}\n"
+        f"**GEOMETRY PATH:** {filepath}\n"
+        f"**TOPOLOGY:** {geom_meta['surfaces']} surfaces, {geom_meta['volumes']} volume(s), "
+        f"{geom_meta['points']} points, {geom_meta['curves']} curves\n"
+        f"**SURFACE TYPES:** {type_summary}\n\n"
+        f"To load this geometry in Gmsh:\n"
+        f"```python\n"
+        f"gmsh.model.occ.importShapes(\"{filepath}\")\n"
+        f"gmsh.model.occ.synchronize()\n"
+        f"```"
+    )
+
+
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     tensors = defaultdict(list)
     non_tensors = defaultdict(list)
@@ -131,10 +174,58 @@ class RLHFDataset(Dataset):
             personas_dataset = load_dataset("proj-persona/PersonaHub", "math", split="train")
             self.personas = [item['input persona'] for item in personas_dataset]
             # self.personas = self.personas.select(range(100))
+
+        # Load geometry metadata for GMSH curriculum training
+        self.geometry_metadata = []
+        if self.format_prompt and "gmsh_format" in self.format_prompt:
+            self.geometry_metadata = load_geometry_metadata()
+            print(f"Loaded {len(self.geometry_metadata)} geometries for GMSH curriculum training")
+
         if self.filter_overlong_prompts:
             self.dataset = self.dataset.filter(self._filter_overlong_prompts, desc="Filtering overlong prompts")
 
     def _build_messages(self, example: Dict[str, Any]) -> List[Dict[str, Any]]:
+        # GMSH curriculum: agent creates meshing task for a PROVIDED geometry
+        if "gmsh_format" in self.format_prompt:
+            # Select a random geometry from loaded metadata
+            if self.geometry_metadata:
+                geom_meta = random.choice(self.geometry_metadata)
+                geometry_context = format_geometry_for_prompt(geom_meta)
+            else:
+                geometry_context = "No geometry available. Create your own simple geometry."
+
+            return [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a curriculum designer for Gmsh meshing training.\n\n"
+                        "You will be given a STEP geometry file. Your job is to create a challenging meshing task for this geometry.\n\n"
+                        "Your task MUST specify:\n"
+                        "1. The analysis type (thermal, structural, modal, CFD, acoustic, electromagnetic, etc.)\n"
+                        "2. Physical groups with meaningful names based on the geometry's surfaces\n"
+                        "   - Identify surfaces by their type (Plane, Cylinder, Torus, etc.) and assign appropriate boundary conditions\n"
+                        "   - Examples: 'inlet', 'outlet', 'wall', 'fixed_support', 'heat_source', 'symmetry_plane'\n"
+                        "3. Mesh size requirements:\n"
+                        "   - Global mesh size\n"
+                        "   - Local refinement near curved surfaces, small features, or boundary layers\n"
+                        "   - Use mesh size fields (Distance, Threshold, Box) for advanced refinement\n"
+                        "4. Mesh quality requirements if applicable (element order, optimization)\n\n"
+                        "DIFFICULTY LEVELS to vary:\n"
+                        "- BASIC: Simple mesh with uniform size, 2-3 physical groups\n"
+                        "- INTERMEDIATE: Multiple physical groups, local refinement near one region\n"
+                        "- ADVANCED: Boundary layers, multiple refinement zones, transfinite meshing\n"
+                        "- EXPERT: Anisotropic mesh, curvature-based sizing, structured regions\n\n"
+                        "Output exactly:\n"
+                        "<task>[complete meshing task description including the geometry path]</task>\n\n"
+                        "Example:\n"
+                        "<task>Load the geometry from [path]. Mesh it for thermal analysis. Create physical groups: 'heat_source' for the cylindrical surfaces (apply heat flux), 'convection_surfaces' for planar faces (convective cooling), 'volume' for the solid domain. Use global element size 2.0 with refinement to 0.5 near cylindrical surfaces using a Distance field.</task>"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Create a meshing task for this geometry:\n\n{geometry_context}"
+                }
+            ]
         prompt_str: str = example[self.prompt_key]
         if "questioner_format_with_persona" in self.format_prompt:
             print("load personas")
@@ -205,7 +296,8 @@ class RLHFDataset(Dataset):
                 ]
         if self.format_prompt:
             format_prompt = Template(self.format_prompt.strip())
-            prompt_str = format_prompt.render(content=prompt_str)
+            # Pass all fields from example (including metadata) to Jinja template
+            prompt_str = format_prompt.render(content=prompt_str, **example)
         
         if self.image_key in example:
             # https://huggingface.co/docs/transformers/en/tasks/image_text_to_text

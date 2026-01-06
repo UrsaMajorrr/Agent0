@@ -333,7 +333,7 @@ def hello():
         try:
             if q and a:
                 # Multi-turn generation
-                final_assistant_messages = generate_with_tool_use(q, max_turns=4)
+                final_assistant_messages = generate_with_tool_use(q, max_turns=1)
                 
                 # Consolidate and Grade
                 item = consolidate_and_grade(q, a, final_assistant_messages)

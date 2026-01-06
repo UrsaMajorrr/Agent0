@@ -14,14 +14,14 @@ except KeyError:
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--max_score", type=float, default=0.7)
-parser.add_argument("--min_score", type=float, default=0.3)
+parser.add_argument("--max_score", type=float, default=0)
+parser.add_argument("--min_score", type=float, default=0)
 parser.add_argument("--experiment_name", type=str, default="Qwen_Qwen3-4B-Base_all")
 args = parser.parse_args()
 
 datas = []
 for i in range(8):
-    file_path = f'{STORAGE_PATH}/generated_question/{args.experiment_name}_{i}_results.json'
+    file_path = f'{STORAGE_PATH}/generated_question/{args.experiment_name}_{i}.json'
     try:
         with open(file_path, 'r') as f:
             data = json.load(f)
@@ -39,9 +39,13 @@ for i in range(8):
         pass
 
 filtered_datas = [
-    {'problem': data['question'], 'answer': data['answer'], 'score': data['score']}
+    {
+        'problem': data['task'],
+        'score': data['score'],
+        'geometry_file': data.get('geometry_file', '')
+    }
     for data in datas
-    if args.min_score <= data.get('score', 0) <= args.max_score and data.get('answer')
+    if args.min_score <= data.get('score', 0) <= args.max_score
 ]
 
 print(f"Filtered down to {len(filtered_datas)} samples.", file=sys.stderr)
