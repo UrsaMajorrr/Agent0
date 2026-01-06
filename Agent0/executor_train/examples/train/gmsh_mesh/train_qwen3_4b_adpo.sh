@@ -1,62 +1,95 @@
+#!/bin/bash
 set -x
-dataset_name=deepmath_torls
-train_data="$STORAGE_PATH/generated_question/qwen3_4b_executor_v1/train.parquet"
-val_data="[$(pwd)/data/${dataset_name}/math500_test.parquet,$(pwd)/data/${dataset_name}/aime24_test.parquet]"
-model_name=Qwen/Qwen3-4B-Base # Qwen/Qwen3-8B-Base
+
+# GMSH Executor Training Script
+# Trains Qwen3-4B to generate GMSH meshing scripts using task completion matching reward
+
+# Force using Agent0_backup codebase
+export PYTHONPATH="/home/kade/Agent0_backup/Agent0/executor_train:$PYTHONPATH"
+
+# Dataset paths - use arg or default
+# Usage: bash train_qwen3_4b_adpo.sh [train_data_path]
+train_data="${1:-$STORAGE_PATH/generated_question/qwen3_4b_executor_v1/train.parquet}"
+
+# Model configuration
+model_name=Qwen/Qwen3-4B-Base
 rl_alg=adpo
+
+# Hardware configuration
 n_gpus_per_node=8
 n_nodes=1
-n=16
-batch_size=128
-ppo_mini_batch_size=128
+
+# Sampling configuration
+n=16                          # Number of rollouts per prompt
+batch_size=16                 # Reduced - must be <= dataset size (27 samples)
+ppo_mini_batch_size=16
 max_prompt_length=1024
-max_response_length=4096
+max_response_length=4096      # GMSH scripts can be long
 max_obs_length=512
 temperature=1.0
 top_p=1.0
-enable_agent=True # enable agent for tool use
+
+# Agent configuration
+enable_agent=True             # Enable agent for tool use
 strategy="fsdp"
 action_stop_tokens='```output'
-max_turns=4
+max_turns=2                   # Multi-turn: generate code, see result, respond
+
+# Optimization
 kl_loss_coef=1e-2
 kl_coef=1e-2
 entropy_coeff=0
 kl_loss_type=low_var_kl
 lr=1e-6
-reward_manager=torl
+
+# Reward
+reward_manager=torl           # Uses dispatch to gmsh_compute_score
+
+# Memory configuration
 ppo_micro_batch_size_per_gpu=1
 log_prob_micro_batch_size_per_gpu=8
 tensor_model_parallel_size=1
-gpu_memory_utilization=0.7 # higher gpu_memory_utilization will likely cause the vllm to OOM and get stuck, so set it to a lower value like 0.4 or 0.5
-do_offload=False # control actor's fsdp.[param|optimizer]_offload and actor_rollout_ref.rollout.fsdp.[param|optimizer]_offload; if gpu_memory_utilization is set to > 0.6, then do_offload should be set to True otherwise it will cause OOM
-use_dynamic_bsz=False # faster
-ulysses_sequence_parallel_size=1 # set to 1 for normal verl behavior, otherwise it will cause OOM
+gpu_memory_utilization=0.7
+do_offload=False
+use_dynamic_bsz=False
+ulysses_sequence_parallel_size=1
 fsdp_size=-1
-additional_eos_token_ids=[151645] # <|im_end|> token id
-mask_observations=True # mask observations for kl loss and gradient descent
-enable_mtrl=False # enable multi-turn training
+additional_eos_token_ids=[151645]  # <|im_end|> token id
+mask_observations=True
+enable_mtrl=True              # Enable multi-turn training
 max_action_length=2048
+
+# Run configuration
 model_pretty_name=$(echo $model_name | tr '/' '_' | tr '[:upper:]' '[:lower:]')
-run_name="agent0_executor_agent_training"
+run_name="gmsh_executor_training_$(date +%Y%m%d_%H%M%S)"
 export VERL_RUN_ID=$run_name
 export NCCL_DEBUG=INFO
 export VLLM_USE_V1=1
 rollout_mode='async'
 
-# temp file for action tokens as verl cannot pass special strs as params
-action_stop_tokens_file="$(pwd)$(mktemp)"
-mkdir -p $(dirname $action_stop_tokens_file)
+# Temp file for action tokens as verl cannot pass special strs as params
+action_stop_tokens_file="/tmp/gmsh_action_stop_tokens_$$"
 echo -e -n "$action_stop_tokens" | tee $action_stop_tokens_file
 echo "action_stop_tokens_file=$action_stop_tokens_file"
 
+# Start GMSH Tool Server
 host=$(hostname -i | awk '{print $1}')
 port=$(shuf -i 30000-31000 -n 1)
 tool_server_url=http://$host:$port/get_observation
-python -m verl_tool.servers.serve --host $host --port $port --tool_type "python_code" --workers_per_tool 8 &
+
+echo "Starting GMSH Tool Server..."
+python -m verl_tool.servers.serve \
+    --host $host \
+    --port $port \
+    --tool_type "gmsh" \
+    --workers_per_tool 8 \
+    --max_concurrent_requests 64 &
 server_pid=$!
 
 echo "Server (pid=$server_pid) started at $tool_server_url"
+sleep 5  # Wait for server to initialize
 
+# Main training
 PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     algorithm.adv_estimator=$rl_alg \
     +actor_rollout_ref.actor.policy_loss_fn=$rl_alg \
@@ -65,9 +98,10 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     +algorithm.min_advantage_scale=0.6 \
     +actor_rollout_ref.actor.max_epsilon_bonus=0.1 \
     data.train_files=$train_data \
-    data.val_files=$val_data \
+    data.val_files=null \
     data.train_batch_size=$batch_size \
-    data.val_batch_size=1024 \
+    data.seed=42 \
+    data.prompt_key=task \
     data.max_prompt_length=$max_prompt_length \
     data.max_response_length=$max_response_length \
     data.truncation='right' \
@@ -129,7 +163,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     critic.ulysses_sequence_parallel_size=$ulysses_sequence_parallel_size \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
     trainer.logger=['console','wandb'] \
-    trainer.project_name=$reward_manager \
+    trainer.project_name=gmsh_executor \
     trainer.experiment_name=$run_name \
     trainer.val_before_train=False \
     trainer.default_hdfs_dir=null \
@@ -137,10 +171,13 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.nnodes=$n_nodes \
     +trainer.remove_previous_ckpt_in_save=False \
     trainer.save_freq=20 \
-    trainer.test_freq=10 \
+    trainer.test_freq=-1 \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=2
+    trainer.total_training_steps=500
 
+# Cleanup
+pkill -P $server_pid
+kill -9 $server_pid
+rm -f $action_stop_tokens_file
 
-pkill -P -9 $server_pid
-kill -9 $kill $server_pid
+echo "Training complete!"

@@ -82,9 +82,16 @@ class VerlToolChatCompletionScheduler(ChatCompletionScheduler):
                 headers={"Authorization": "Bearer token-abc123", **extra_headers},
                 json=complete_request,
             ) as resp:
-                data = await resp.json()
                 if resp.status != 200:
-                    raise ValueError(f"Request failed with status {data.get('code', 'unknown')}: {data}")
+                    # Try to get error message - could be JSON or plain text
+                    try:
+                        error_data = await resp.json()
+                        error_msg = f"Request failed with status {error_data.get('code', 'unknown')}: {error_data}"
+                    except:
+                        error_text = await resp.text()
+                        error_msg = f"Request failed with status {resp.status}: {error_text}"
+                    raise ValueError(error_msg)
+                data = await resp.json()
                 return Completion(**data)
         finally:
             await session.close()

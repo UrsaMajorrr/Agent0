@@ -476,7 +476,9 @@ class AsyncToolServer:
         ):
             """Main endpoint for processing observations"""
             start_time = time.time()
-            
+            print(f"[DEBUG SERVE] Received request with {len(request_data.trajectory_ids)} trajectories", flush=True)
+            print(f"[DEBUG SERVE] Sample action (first 200 chars): {request_data.actions[0][:200] if request_data.actions else 'None'}", flush=True)
+
             try:
                 # Process extra fields
                 extra_fields = self._prepare_extra_fields(request_data)
@@ -498,6 +500,11 @@ class AsyncToolServer:
                     ),
                     timeout=self.config.request_timeout
                 )
+                # Debug: check observation types
+                for i, obs in enumerate(observations[:3]):  # Check first 3
+                    obs_type = type(obs).__name__
+                    has_mesh = 'mesh_stats' in obs if isinstance(obs, dict) else False
+                    print(f"[DEBUG SERVE] obs[{i}]: type={obs_type}, has_mesh_stats={has_mesh}", flush=True)
                 
                 processing_time_ms = (time.time() - start_time) * 1000
                 response = AgentResponse(

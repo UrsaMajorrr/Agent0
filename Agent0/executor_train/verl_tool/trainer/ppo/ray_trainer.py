@@ -454,7 +454,11 @@ class AgentRayPPOTrainer(RayPPOTrainer):
 
                     # added for adpo: ensure score is in batch.batch as a tensor
                     if "score" in batch.non_tensor_batch:
-                        batch.batch["score"] = torch.tensor(batch.non_tensor_batch["score"],
+                        # Convert object array to float array first
+                        scores = batch.non_tensor_batch["score"]
+                        if scores.dtype == object:
+                            scores = np.array([float(s) for s in scores], dtype=np.float32)
+                        batch.batch["score"] = torch.tensor(scores,
                                                           device=batch.batch["responses"].device,
                                                           dtype=torch.float32)
 

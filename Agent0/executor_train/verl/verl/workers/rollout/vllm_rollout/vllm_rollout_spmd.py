@@ -47,7 +47,6 @@ from tensordict import TensorDict
 from vllm import LLM, SamplingParams
 from vllm.distributed import parallel_state as vllm_ps
 from vllm.lora.request import LoRARequest
-from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.worker.worker_base import WorkerWrapperBase
 
 from verl import DataProto
@@ -391,9 +390,8 @@ def _monkey_patch_compute_logits(model, vocab_size: int):
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
     ) -> torch.Tensor:
-        logits = original_compute_logits(hidden_states, sampling_metadata)
+        logits = original_compute_logits(hidden_states)
         logits[..., vocab_size:] = float("-inf")
         return logits
 

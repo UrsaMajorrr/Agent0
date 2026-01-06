@@ -592,7 +592,7 @@ class RayPPOTrainer:
             train_dataset = create_rl_dataset(
                 self.config.data.train_files, self.config.data, self.tokenizer, self.processor
             )
-        if val_dataset is None:
+        if val_dataset is None and self.config.data.val_files is not None:
             val_dataset = create_rl_dataset(
                 self.config.data.val_files, self.config.data, self.tokenizer, self.processor
             )
@@ -616,26 +616,31 @@ class RayPPOTrainer:
             sampler=train_sampler,
         )
 
-        val_batch_size = self.config.data.val_batch_size  # Prefer config value if set
-        if val_batch_size is None:
-            val_batch_size = len(self.val_dataset)
+        # Only create val_dataloader if we have a validation dataset
+        self.val_dataloader = None
+        if self.val_dataset is not None:
+            val_batch_size = self.config.data.val_batch_size  # Prefer config value if set
+            if val_batch_size is None:
+                val_batch_size = len(self.val_dataset)
 
-        self.val_dataloader = StatefulDataLoader(
-            dataset=self.val_dataset,
-            batch_size=val_batch_size,
-            num_workers=num_workers,
-            shuffle=self.config.data.get("validation_shuffle", True),
-            drop_last=False,
-            collate_fn=collate_fn,
-        )
+            self.val_dataloader = StatefulDataLoader(
+                dataset=self.val_dataset,
+                batch_size=val_batch_size,
+                num_workers=num_workers,
+                shuffle=self.config.data.get("validation_shuffle", True),
+                drop_last=False,
+                collate_fn=collate_fn,
+            )
 
         assert len(self.train_dataloader) >= 1, "Train dataloader is empty!"
-        assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
-
-        print(
-            f"Size of train dataloader: {len(self.train_dataloader)}, Size of val dataloader: "
-            f"{len(self.val_dataloader)}"
-        )
+        if self.val_dataloader is not None:
+            assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
+            print(
+                f"Size of train dataloader: {len(self.train_dataloader)}, Size of val dataloader: "
+                f"{len(self.val_dataloader)}"
+            )
+        else:
+            print(f"Size of train dataloader: {len(self.train_dataloader)}, No validation dataset")
 
         total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
 
@@ -707,6 +712,11 @@ class RayPPOTrainer:
         self.validation_generations_logger.log(self.config.trainer.logger, samples, self.global_steps)
 
     def _validate(self):
+        # Skip validation if no validation dataloader
+        if self.val_dataloader is None:
+            print("Skipping validation - no validation dataset")
+            return {}
+
         data_source_lst = []
         reward_extra_infos_dict: dict[str, list] = defaultdict(list)
 
@@ -1109,9 +1119,9 @@ class RayPPOTrainer:
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
-        if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
+        if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True) and self.val_dataloader is not None:
             val_metrics = self._validate()
-            assert val_metrics, f"{val_metrics=}"
+            assert val_metrics is not None, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get("val_only", False):

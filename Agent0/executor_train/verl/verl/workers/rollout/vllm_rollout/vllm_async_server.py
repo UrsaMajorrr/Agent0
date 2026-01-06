@@ -153,6 +153,7 @@ class ExternalZeroMQDistributedExecutor(Executor):
         timeout: Optional[float] = None,
         args: tuple = (),
         kwargs: Optional[dict[str, Any]] = None,
+        non_block: bool = False,
     ) -> list[Any]:
         if isinstance(method, str):
             sent_method = method
@@ -163,6 +164,10 @@ class ExternalZeroMQDistributedExecutor(Executor):
         message = pickle.dumps((sent_method, args, kwargs or {}))
         for socket in self.sockets:
             socket.send(message, zmq.DONTWAIT)
+
+        # If non_block is True, return immediately without waiting for responses
+        if non_block:
+            return []
 
         outputs = []
         for socket in self.sockets:

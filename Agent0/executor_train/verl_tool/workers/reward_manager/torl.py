@@ -20,6 +20,7 @@ from pathlib import Path
 from verl import DataProto
 from .reward_score import _default_compute_score
 from .reward_score.torl_math import compute_score as torl_compute_score
+from .reward_score.gmsh_executor import compute_score as gmsh_compute_score
 from verl.workers.reward_manager import register
 import torch
 from collections import defaultdict
@@ -36,6 +37,14 @@ class ToRLRewardManager:
         # self.compute_score = compute_score if compute_score else _default_compute_score
         self.compute_score = torl_compute_score
         self.reward_fn_key = reward_fn_key
+
+        # Dispatch table for different reward functions
+        self.compute_score_functions = {
+            'torl_math': torl_compute_score,
+            'gmsh_mesh': gmsh_compute_score,
+            'default': torl_compute_score
+        }
+
         self.step = None
         self.add_format_think_penalty = False # -0.5 if not begines with <think> and end with </think>
         self.add_format_answer_penalty = False # -0.5 if not having <answer> </answer>
@@ -166,12 +175,54 @@ class ToRLRewardManager:
 
             extra_info = data_item.non_tensor_batch.get('extra_info', None)
 
-            torl_score = self.compute_score(
-                # data_source=data_source,
-                solution_str=response_str,
-                ground_truth=ground_truth,
-                # extra_info=extra_info,
-            ) # 1 or -1
+            # Extract mesh stats from tool interaction for GMSH tasks
+            # Check tool_interact_info regardless of data_source - if mesh_stats exists, it's a GMSH task
+            mesh_stats = None
+            is_gmsh_task = data_source == 'gmsh_mesh'
+
+            if 'tool_interact_info' in data_item.non_tensor_batch:
+                tool_info = data_item.non_tensor_batch['tool_interact_info']
+                # DEBUG: Log tool_info structure
+                if isinstance(tool_info, list):
+                    print(f"[DEBUG REWARD] tool_info has {len(tool_info)} turns")
+                    for idx, turn in enumerate(tool_info):
+                        if isinstance(turn, dict):
+                            has_mesh = 'mesh_stats' in turn and turn['mesh_stats'] is not None
+                            print(f"[DEBUG REWARD]   Turn {idx}: keys={list(turn.keys())[:5]}, has_mesh_stats={has_mesh}")
+                            if has_mesh:
+                                print(f"[DEBUG REWARD]   Turn {idx} mesh_stats: {turn['mesh_stats']}")
+                                mesh_stats = turn['mesh_stats']
+                                is_gmsh_task = True  # Auto-detect GMSH task from mesh_stats
+                                break
+                elif isinstance(tool_info, dict):
+                    # Fallback for backward compatibility
+                    if 'mesh_stats' in tool_info and tool_info['mesh_stats'] is not None:
+                        mesh_stats = tool_info.get('mesh_stats')
+                        is_gmsh_task = True
+                print(f"[DEBUG REWARD] Final mesh_stats found: {mesh_stats is not None}, is_gmsh_task: {is_gmsh_task}")
+
+            # Select appropriate scoring function based on data source or detected task type
+            if is_gmsh_task:
+                score_fn = self.compute_score_functions['gmsh_mesh']
+            else:
+                score_fn = self.compute_score_functions.get(
+                    data_source,
+                    self.compute_score_functions['default']
+                )
+
+            # Compute score with appropriate parameters
+            if is_gmsh_task:
+                torl_score = score_fn(
+                    solution_str=response_str,
+                    ground_truth=ground_truth,
+                    mesh_stats=mesh_stats,
+                    extra_info=extra_info
+                )
+            else:
+                torl_score = score_fn(
+                    solution_str=response_str,
+                    ground_truth=ground_truth,
+                ) # 1 or -1
             score['accuracy'] = 1 if torl_score > 0 else 0
             score['score'] = torl_score
 
@@ -214,7 +265,7 @@ class ToRLRewardManager:
                     
             # Save the records
             to_save_records.append({
-                'id': data_item.non_tensor_batch['extra_info']['id'] if 'id' in data_item.non_tensor_batch['extra_info'] else None,
+                'id': data_item.non_tensor_batch.get('extra_info', {}).get('id', None),
                 'data_source': data_source,
                 "prompt": self.tokenizer.decode(prompt_ids[-valid_prompt_length:], skip_special_tokens=False),
                 "response": self.tokenizer.decode(response_ids[:valid_response_length], skip_special_tokens=False),

@@ -315,3 +315,5 @@ verl_step_records/
 /*.sh
 /*.jpg
 /*.jsonl
+*.out
+*.err
