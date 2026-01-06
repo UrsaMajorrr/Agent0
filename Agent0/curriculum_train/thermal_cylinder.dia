@@ -1,1 +1,0 @@
-gmsh -3 -o thermal_cylinder.msh thermal_cylinder.geo
