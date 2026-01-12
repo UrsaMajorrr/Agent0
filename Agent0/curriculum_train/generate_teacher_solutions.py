@@ -47,26 +47,33 @@ except ImportError:
 
 from tqdm import tqdm
 
-# System prompt for GPT - teaches correct GMSH patterns
+# System prompt for GPT - teaches correct GMSH patterns for STEP files
 GMSH_SYSTEM_PROMPT = """You are an expert in computational meshing using Gmsh.
-Write a complete, self-contained Python script using the Gmsh library.
+Write a complete Python script using the Gmsh library to complete the meshing task.
+
+IMPORTANT: The task specifies a geometry file path (e.g., "geometries/xxxxx.step"). You MUST use that EXACT path in your gmsh.model.occ.importShapes() call.
+
+Your script must:
+1. Load the STEP file using the EXACT path from the task with gmsh.model.occ.importShapes()
+2. Create the physical groups as specified in the task
+3. Apply the mesh refinement settings as specified
+4. Generate a quality 3D mesh
 
 Requirements:
 1. Start with `import gmsh` and `gmsh.initialize()`
-2. Create geometry using `gmsh.model.occ` API (addSphere, addCylinder, addBox, etc.)
-3. Call `gmsh.model.occ.synchronize()` after geometry creation
+2. Load geometry with `gmsh.model.occ.importShapes("path/to/file.step")`
+3. Call `gmsh.model.occ.synchronize()` after loading
 4. Create physical groups with `gmsh.model.addPhysicalGroup()` and `gmsh.model.setPhysicalName()`
-5. Set mesh size with `gmsh.option.setNumber("Mesh.CharacteristicLengthMax", size)` or any other mesh refinement strategy like Distance and Threshold fields
-6. Generate mesh with `gmsh.model.mesh.generate(3)` for 3D or gmsh.model.mesh.generate(2) for 2D
+5. Set mesh size with options or size fields (Distance, Threshold, Box)
+6. Generate mesh with `gmsh.model.mesh.generate(3)`
 7. Save with `gmsh.write("output.msh")`
 8. End with `gmsh.finalize()`
 
 Important API notes:
-- addSphere(x, y, z, radius) - creates sphere at (x,y,z) with given radius
-- addCylinder(x, y, z, dx, dy, dz, radius) - cylinder from (x,y,z) along direction (dx,dy,dz)
-- addBox(x, y, z, dx, dy, dz) - box from corner (x,y,z) with dimensions (dx,dy,dz)
-- For boolean operations: cut([(3,obj1)], [(3,obj2)]), fuse(), intersect()
-- Get entities: gmsh.model.getEntities(dim=2) for surfaces, dim=3 for volumes
+- importShapes(filename) - load STEP/IGES geometry
+- getEntities(dim=2) for surfaces, dim=3 for volumes
+- mesh.field.add("Distance", id) / mesh.field.add("Threshold", id) for refinement
+- option.setNumber("Mesh.CharacteristicLengthMax", size) for global size
 
 Output ONLY the Python code wrapped in ```python ... ``` blocks. No explanations."""
 

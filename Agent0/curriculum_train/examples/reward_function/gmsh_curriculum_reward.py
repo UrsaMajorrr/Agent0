@@ -24,7 +24,15 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from collections import Counter
+from pathlib import Path
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(filename="curriculum_train_logger.log", level=logging.DEBUG)
+
+geometry_directory = Path("geometries")
+geometry_files = [str(item) for item in geometry_directory.iterdir() if item.is_file()]
 
 # BLEU-based clustering for diversity
 try:
@@ -33,7 +41,7 @@ try:
     HAS_CLUSTERING = True
 except ImportError:
     HAS_CLUSTERING = False
-    print("[Warning] NLTK/sklearn not available, using simple diversity metric")
+    logger.error("[Warning] NLTK/sklearn not available, using simple diversity metric")
 
 STORAGE_PATH = os.getenv("STORAGE_PATH", "")
 
@@ -69,6 +77,7 @@ def cluster_share_per_task(
     if not tasks:
         return []
 
+
     if not HAS_CLUSTERING or len(tasks) < 3:
         # Fallback: simple hash-based deduplication
         seen = {}
@@ -82,7 +91,7 @@ def cluster_share_per_task(
             penalties.append(seen[key] / len(tasks))
         return penalties
 
-    print('  - Starting task clustering...')
+    logger.info('  - Starting task clustering...')
     start_time = time.time()
     dist_mat = _bleu_distance_matrix(tasks)
 
@@ -93,7 +102,7 @@ def cluster_share_per_task(
         linkage=linkage
     )
     labels = clustering.fit_predict(dist_mat)
-    print(f'  - Clustering done, time: {time.time() - start_time:.2f}s')
+    logger.info(f'  - Clustering done, time: {time.time() - start_time:.2f}s')
 
     total = len(tasks)
     cluster_size = Counter(labels)
@@ -161,7 +170,7 @@ def generate_results(data):
                 final_results.extend(json.load(f))
             os.remove(result_file)
         except FileNotFoundError:
-            print(f"  - WARNING: Result file not found: {result_file}")
+            logger.exception(f"  - WARNING: Result file not found: {result_file}")
 
     return final_results
 
@@ -170,54 +179,155 @@ def generate_results(data):
 # Task Completeness (fallback when vLLM not available)
 # ============================================================================
 
-# Geometry types the agent should pick from
-GEOMETRY_TYPES = ['box', 'cylinder', 'sphere', 'cone', 'wedge', 'torus', 'cube', 'block']
+# Analysis types for FEA meshing tasks
+ANALYSIS_TYPES = [
+    'thermal', 'structural', 'modal', 'buckling', 'fatigue', 'dynamic',
+    'static', 'stress', 'heat', 'vibration', 'frequency',
+    'transient', 'steady-state'
+]
 
-# Analysis types
-ANALYSIS_TYPES = ['thermal', 'structural', 'modal', 'buckling', 'fatigue', 'dynamic',
-                  'stress', 'heat', 'vibration', 'frequency']
+# Keywords indicating physical groups with meaningful assignments
+PHYSICAL_GROUP_KEYWORDS = [
+    'physical group', 'physical_group', 'physicalgroup',
+    'boundary', 'boundary condition',
+]
 
-# Keywords indicating physical groups
-PHYSICAL_GROUP_KEYWORDS = ['physical group', 'physical_group', 'physicalgroup',
-                           'boundary', 'face', 'surface', 'volume', 'top', 'bottom',
-                           'inlet', 'outlet', 'wall', 'domain']
+# Mesh refinement keywords
+MESH_REFINEMENT_KEYWORDS = [
+    'mesh size', 'element size', 'mesh_size', 'element_size',
+    'refinement', 'refine', 'local refinement',
+    'size field', 'distance field', 'threshold field', 'box field',
+    'boundary layer', 'boundary_layer', 'boundarylayer',
+    'transfinite', 'structured', 'unstructured',
+    'curvature', 'curvature-based', 'adaptive',
+    'global size', 'local size', 'min size', 'max size',
+    'setsize', 'lc', 'characteristic length'
+]
+
+# Surface type keywords (from geometry metadata)
+SURFACE_TYPE_KEYWORDS = [
+    'plane', 'planar', 'cylinder', 'cylindrical', 'torus', 'toroidal',
+    'sphere', 'spherical', 'cone', 'conical', 'curved', 'fillet'
+]
 
 
-def check_task_completeness(task: str) -> float:
+def check_geometry_file_reference(task: str) -> float:
     """
-    Check if task mentions all required elements.
-    Returns score 0.0-1.0 based on completeness.
+    Check if task properly references a geometry file.
+    Returns 1.0 if valid file found, 0.0 otherwise.
+    """
+    match = re.search(r'geometries/[a-zA-Z0-9_\-\.]+\.step', task, re.IGNORECASE)
+
+    if not match:
+        return 0.0
+
+    geom_file_string = match.group(0)
+
+    if geom_file_string in geometry_files:
+        return 1.0
+
+    return 0.0
+
+
+def check_analysis_type(task: str) -> float:
+    """Check if task specifies an analysis type."""
+    task_lower = task.lower()
+    for analysis in ANALYSIS_TYPES:
+        if analysis in task_lower:
+            # Bonus for context (e.g., "thermal analysis", "structural simulation")
+            if re.search(rf'{analysis}\s+(analysis|simulation|problem|study)', task_lower):
+                return 1.0
+            return 0.8
+    return 0.0
+
+
+def check_physical_groups(task: str) -> float:
+    """
+    Check if task defines physical groups.
+    Returns score 0.0-1.0 based on quality of physical group definitions.
     """
     task_lower = task.lower()
     score = 0.0
 
-    # Check for geometry type (required)
-    for geom in GEOMETRY_TYPES:
-        if geom in task_lower:
-            score += 0.25
-            break
+    # Check for physical group keyword
+    has_pg_keyword = any(kw in task_lower for kw in PHYSICAL_GROUP_KEYWORDS)
+    if has_pg_keyword:
+        score += 0.4
 
-    # Check for dimensions (numbers like 10x10x10, radius 5, etc.)
-    if re.search(r'\d+\s*[x×]\s*\d+', task_lower):  # 10x10 format
-        score += 0.25
-    elif re.search(r'(radius|height|width|length|depth|size)\s*[=:]?\s*\d+', task_lower):
-        score += 0.25
-    elif re.search(r'\d+\s*(mm|cm|m|unit)', task_lower):
-        score += 0.25
+    # Check for quoted group names (e.g., 'inlet', "wall", etc.)
+    quoted_names = re.findall(r"['\"]([a-zA-Z_][a-zA-Z0-9_]*)['\"]", task)
+    if len(quoted_names) >= 3:
+        score += 0.4
+    elif len(quoted_names) >= 2:
+        score += 0.3
+    elif len(quoted_names) >= 1:
+        score += 0.2
 
-    # Check for analysis type
-    for analysis in ANALYSIS_TYPES:
-        if analysis in task_lower:
-            score += 0.25
-            break
-
-    # Check for physical groups
-    for keyword in PHYSICAL_GROUP_KEYWORDS:
-        if keyword in task_lower:
-            score += 0.25
-            break
+    # Check for surface assignment patterns (e.g., "for the cylindrical surfaces")
+    surface_assignment = re.search(
+        r'(for|assign|on|at)\s+(the\s+)?(plane|planar|cylinder|cylindrical|curved|torus|spherical|conical)\s+(surface|face)',
+        task_lower
+    )
+    if surface_assignment:
+        score += 0.2
 
     return min(score, 1.0)
+
+
+def check_mesh_refinement(task: str) -> float:
+    """
+    Check if task specifies mesh refinement requirements.
+    Returns score 0.0-1.0 based on quality of mesh specifications.
+    """
+    task_lower = task.lower()
+    score = 0.0
+
+    # Count mesh refinement keywords found
+    refinement_keywords_found = sum(1 for kw in MESH_REFINEMENT_KEYWORDS if kw in task_lower)
+    if refinement_keywords_found:
+        score += 0.5
+
+    # Check for numeric mesh size values
+    if re.search(r'(size|lc|length)\s*[=:]?\s*\d+\.?\d*', task_lower):
+        score += 0.25
+
+    # Check for size field specification (advanced)
+    if re.search(r'(distance|threshold|box|min|max)\s*field', task_lower):
+        score += 0.25
+
+    return min(score, 1.0)
+
+
+def check_task_completeness(task: str) -> float:
+    """
+    Check if task mentions all required elements for geometry-based meshing.
+
+    Tasks should include:
+    1. Reference to a .step geometry file (25%)
+    2. Analysis type (20%)
+    3. Physical groups with meaningful names (30%)
+    4. Mesh refinement specifications (25%)
+
+    Returns score 0.0-1.0 based on completeness.
+    """
+    if not task:
+        return 0.0
+
+    # Score each component
+    geometry_score = check_geometry_file_reference(task)
+    analysis_score = check_analysis_type(task)
+    physical_group_score = check_physical_groups(task)
+    mesh_refinement_score = check_mesh_refinement(task)
+
+    # Weighted combination
+    final_score = (
+        0.25 * geometry_score +
+        0.25 * analysis_score +
+        0.25 * physical_group_score +
+        0.25 * mesh_refinement_score
+    )
+
+    return final_score
 
 
 # ============================================================================
@@ -238,8 +348,8 @@ def compute_score(
     - Executability: vLLM executor can generate working scripts (70%)
     - Diversity: Tasks are varied using BLEU clustering (20%)
     """
-    print("\n[Gmsh Curriculum Reward]")
-    print(f" - Processing {len(predicts)} predictions...")
+    logger.info("\n[Gmsh Curriculum Reward]")
+    logger.info(f" - Processing {len(predicts)} predictions...")
 
     # Save predictions for debugging
     with open('test.json', 'w') as f:
@@ -259,24 +369,12 @@ def compute_score(
     # Step 2: Try to call vLLM servers for validation
     valid_tasks_data = [t for t in tasks if t['task']]
 
-    try:
-        if valid_tasks_data:
-            print(" - Sending tasks to vLLM servers for validation...")
-            final_results = generate_results(valid_tasks_data)
-        else:
-            print(" - No valid tasks to process")
-            final_results = []
-    except Exception as e:
-        print(f" - WARNING: vLLM servers not available ({e}), using static analysis")
-        # Fallback to static completeness check
+    if valid_tasks_data:
+        logger.info(" - Sending tasks to vLLM servers for validation...")
+        final_results = generate_results(valid_tasks_data)
+    else:
+        logger.warning(" - No valid tasks to process")
         final_results = []
-        for t in valid_tasks_data:
-            completeness = check_task_completeness(t['task'])
-            final_results.append({
-                'task': t['task'],
-                'best_score': completeness,
-                'num_successful': 1 if completeness > 0.5 else 0
-            })
 
     # Map results back to original indices
     final_results_map = {r['task']: r for r in final_results}
@@ -294,7 +392,7 @@ def compute_score(
         penalty_map[task_str] = penalty[i] if i < len(penalty) else 0.0
 
     # Step 4: Compute final scores
-    print(" - Computing final scores...")
+    logger.info(" - Computing final scores...")
     scores = []
 
     for i in tqdm(range(len(tasks)), desc=" - Calculating final scores"):
@@ -338,11 +436,11 @@ def compute_score(
     # Print summary
     valid_scores = [s for s in scores if s['overall'] >= 0]
     if valid_scores:
-        print(f" - Average score: {np.mean([s['overall'] for s in valid_scores]):.3f}")
-        print(f" - Format rate: {np.mean([s['format'] for s in valid_scores]):.3f}")
-        print(f" - Executability: {np.mean([s['executability'] for s in valid_scores]):.3f}")
-        print(f" - Diversity: {np.mean([s['diversity'] for s in valid_scores]):.3f}")
+        logger.info(f" - Average score: {np.mean([s['overall'] for s in valid_scores]):.3f}")
+        logger.info(f" - Format rate: {np.mean([s['format'] for s in valid_scores]):.3f}")
+        logger.info(f" - Executability: {np.mean([s['executability'] for s in valid_scores]):.3f}")
+        logger.info(f" - Diversity: {np.mean([s['diversity'] for s in valid_scores]):.3f}")
     else:
-        print(" - No valid scores to report")
+        logger.warning(" - No valid scores to report")
 
     return scores

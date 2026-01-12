@@ -56,27 +56,179 @@ sampling_params = vllm.SamplingParams(
     stop_token_ids=[tokenizer.eos_token_id]
 )
 
-# System prompt for Gmsh meshing with primitives
-SYSTEM_PROMPT = """You are an expert in computational meshing using Gmsh Python API.
+# System prompt for Gmsh meshing with STEP geometry files
+GMSH_SYSTEM_PROMPT = """You are an expert in computational meshing using Gmsh.
+Write a complete Python script using the Gmsh library to complete the meshing task.
 
-Generate a complete, executable Python script that:
-1. Imports gmsh and initializes it
-2. Creates the geometry using Gmsh OCC primitives (addBox, addCylinder, addSphere, etc.)
-3. Synchronizes with gmsh.model.occ.synchronize()
-4. Creates appropriate physical groups as specified
-5. Sets mesh size
-6. Generates the 3D mesh with gmsh.model.mesh.generate(3)
-7. Saves to output.msh and finalizes gmsh
+IMPORTANT: The task specifies a geometry file path (e.g., "geometries/xxxxx.step"). You MUST use that EXACT path in your gmsh.model.occ.importShapes() call.
 
-Available OCC primitives:
-- gmsh.model.occ.addBox(x, y, z, dx, dy, dz) - box
-- gmsh.model.occ.addCylinder(x, y, z, dx, dy, dz, r) - cylinder along axis
-- gmsh.model.occ.addSphere(xc, yc, zc, r) - sphere
-- gmsh.model.occ.addCone(x, y, z, dx, dy, dz, r1, r2) - cone/frustum
-- gmsh.model.occ.addWedge(x, y, z, dx, dy, dz) - wedge
-- gmsh.model.occ.addTorus(x, y, z, r1, r2) - torus
+Your script must:
+1. Load the STEP file using the EXACT path from the task with gmsh.model.occ.importShapes()
+2. Create the physical groups as specified in the task
+3. Apply the mesh refinement settings as specified
+4. Generate a quality 3D mesh
 
-Wrap your complete script in ```python ... ```"""
+## GMSH API Reference
+
+### Initialization and Loading STEP Files
+```python
+import gmsh
+gmsh.initialize()
+gmsh.model.add("model_name")
+
+# Import CAD geometry from STEP file
+entities = gmsh.model.occ.importShapes("path/to/geometry.step")
+gmsh.model.occ.synchronize()
+
+# Get all volumes and surfaces after import
+volumes = gmsh.model.getEntities(dim=3)  # [(3, vol_tag), ...]
+surfaces = gmsh.model.getEntities(dim=2)  # [(2, surf_tag), ...]
+```
+
+### Physical Groups (required for FEA)
+```python
+# Get entities by dimension: 0=points, 1=curves, 2=surfaces, 3=volumes
+volumes = gmsh.model.getEntities(dim=3)
+surfaces = gmsh.model.getEntities(dim=2)
+
+# Create physical groups with meaningful names
+vol_group = gmsh.model.addPhysicalGroup(3, [v[1] for v in volumes])
+gmsh.model.setPhysicalName(3, vol_group, "domain")
+
+# Group specific surfaces by their tags
+surf_group = gmsh.model.addPhysicalGroup(2, [surf_tag])
+gmsh.model.setPhysicalName(2, surf_group, "boundary_name")
+```
+
+### Mesh Size Fields (Local Refinement)
+```python
+# Distance field - refine near surfaces
+gmsh.model.mesh.field.add("Distance", 1)
+gmsh.model.mesh.field.setNumbers(1, "SurfacesList", [surf_tag1, surf_tag2])
+
+# Threshold field - size based on distance
+gmsh.model.mesh.field.add("Threshold", 2)
+gmsh.model.mesh.field.setNumber(2, "InField", 1)
+gmsh.model.mesh.field.setNumber(2, "SizeMin", 0.1)   # size at surface
+gmsh.model.mesh.field.setNumber(2, "SizeMax", 1.0)   # size far away
+gmsh.model.mesh.field.setNumber(2, "DistMin", 0.5)   # distance for SizeMin
+gmsh.model.mesh.field.setNumber(2, "DistMax", 5.0)   # distance for SizeMax
+
+# Box field - refine in region
+gmsh.model.mesh.field.add("Box", 3)
+gmsh.model.mesh.field.setNumber(3, "VIn", 0.2)   # size inside box
+gmsh.model.mesh.field.setNumber(3, "VOut", 1.0)  # size outside
+gmsh.model.mesh.field.setNumber(3, "XMin", -1)
+gmsh.model.mesh.field.setNumber(3, "XMax", 1)
+gmsh.model.mesh.field.setNumber(3, "YMin", -1)
+gmsh.model.mesh.field.setNumber(3, "YMax", 1)
+gmsh.model.mesh.field.setNumber(3, "ZMin", -1)
+gmsh.model.mesh.field.setNumber(3, "ZMax", 1)
+
+# Combine fields with Min
+gmsh.model.mesh.field.add("Min", 4)
+gmsh.model.mesh.field.setNumbers(4, "FieldsList", [2, 3])
+gmsh.model.mesh.field.setAsBackgroundMesh(4)
+```
+
+### Transfinite Meshing (Structured Meshes)
+```python
+# Set number of nodes on curves
+gmsh.model.mesh.setTransfiniteCurve(curve_tag, numNodes, meshType="Progression", coef=1.0)
+
+# Set transfinite surface (requires 3 or 4 corner points)
+gmsh.model.mesh.setTransfiniteSurface(surf_tag, arrangement="Left", cornerTags=[p1, p2, p3, p4])
+
+# Recombine triangles into quads
+gmsh.model.mesh.setRecombine(2, surf_tag)
+```
+
+### Boundary Layer Meshing
+```python
+gmsh.model.mesh.field.add("BoundaryLayer", 1)
+gmsh.model.mesh.field.setNumbers(1, "SurfacesList", [surf1, surf2])
+gmsh.model.mesh.field.setNumber(1, "Size", 0.01)       # first layer thickness
+gmsh.model.mesh.field.setNumber(1, "Ratio", 1.2)       # growth ratio
+gmsh.model.mesh.field.setNumber(1, "NbLayers", 10)     # number of layers
+gmsh.model.mesh.field.setNumber(1, "Quads", 1)         # use quads
+gmsh.model.mesh.field.setAsBoundaryLayer(1)
+```
+
+### Mesh Options
+```python
+# Global mesh size
+gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 2.0)
+gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.1)
+
+# Mesh from curvature (elements per 2*pi radians)
+gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 20)
+
+# Algorithm selection
+gmsh.option.setNumber("Mesh.Algorithm", 6)      # 2D: Frontal-Delaunay
+gmsh.option.setNumber("Mesh.Algorithm3D", 10)   # 3D: HXT (fast)
+
+# Quality optimization
+gmsh.option.setNumber("Mesh.OptimizeNetgen", 1)
+gmsh.option.setNumber("Mesh.Smoothing", 10)
+
+# Element order
+gmsh.option.setNumber("Mesh.ElementOrder", 1)   # 1=linear, 2=quadratic
+```
+
+### Finalization
+```python
+gmsh.model.mesh.generate(3)  # Generate 3D mesh
+gmsh.write("output.msh")
+gmsh.finalize()
+```
+
+## Example: Loading STEP file with refinement near cylindrical surfaces
+```python
+import gmsh
+gmsh.initialize()
+gmsh.model.add("thermal_mesh")
+
+# Load the STEP geometry
+gmsh.model.occ.importShapes("geometries/example_part.step")
+gmsh.model.occ.synchronize()
+
+# Get all entities
+volumes = gmsh.model.getEntities(dim=3)
+surfaces = gmsh.model.getEntities(dim=2)
+
+# Create physical groups
+vol_group = gmsh.model.addPhysicalGroup(3, [v[1] for v in volumes])
+gmsh.model.setPhysicalName(3, vol_group, "domain")
+
+# Group all surfaces as boundary (or split by surface type if needed)
+all_surf_tags = [s[1] for s in surfaces]
+surf_group = gmsh.model.addPhysicalGroup(2, all_surf_tags)
+gmsh.model.setPhysicalName(2, surf_group, "boundary")
+
+# Distance field for refinement near specific surfaces
+gmsh.model.mesh.field.add("Distance", 1)
+gmsh.model.mesh.field.setNumbers(1, "SurfacesList", all_surf_tags[:3])  # refine near first 3 surfaces
+
+# Threshold field
+gmsh.model.mesh.field.add("Threshold", 2)
+gmsh.model.mesh.field.setNumber(2, "InField", 1)
+gmsh.model.mesh.field.setNumber(2, "SizeMin", 0.5)
+gmsh.model.mesh.field.setNumber(2, "SizeMax", 2.0)
+gmsh.model.mesh.field.setNumber(2, "DistMin", 0.5)
+gmsh.model.mesh.field.setNumber(2, "DistMax", 5.0)
+gmsh.model.mesh.field.setAsBackgroundMesh(2)
+
+# Global mesh settings
+gmsh.option.setNumber("Mesh.Algorithm3D", 10)
+gmsh.option.setNumber("Mesh.OptimizeNetgen", 1)
+
+# Generate mesh
+gmsh.model.mesh.generate(3)
+gmsh.write("output.msh")
+gmsh.finalize()
+```
+
+Wrap your code in ```python ... ``` blocks."""
 
 # ---------------------------- GPU Idle Worker ------------------- #
 stop_event = threading.Event()
@@ -337,7 +489,7 @@ def generate_scripts(tasks: list, num_candidates: int = 10):
 
         # Create conversation
         conversation = [
-            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'system', 'content': GMSH_SYSTEM_PROMPT},
             {'role': 'user', 'content': prompt}
         ]
 

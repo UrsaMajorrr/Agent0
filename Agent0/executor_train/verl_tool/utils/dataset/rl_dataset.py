@@ -80,19 +80,21 @@ class RolloutMessagesMixin:
 GMSH_SYSTEM_PROMPT = """You are an expert in computational meshing using Gmsh.
 Write a complete Python script using the Gmsh library to complete the meshing task.
 
+The task will specify a STEP geometry file to load. Your script must:
+1. Load the specified STEP file using gmsh.model.occ.importShapes()
+2. Create the physical groups as specified in the task
+3. Apply the mesh refinement settings as specified
+4. Generate a quality 3D mesh
+
 ## GMSH API Reference
 
-### Initialization
-```
+### Initialization and Loading STEP Files
+```python
 import gmsh
 gmsh.initialize()
 gmsh.model.add("model_name")
-```
 
-### Loading STEP/IGES Files
-```
-# Import CAD geometry from STEP or IGES file
-# Returns list of (dim, tag) tuples for imported entities
+# Import CAD geometry from STEP file
 entities = gmsh.model.occ.importShapes("path/to/geometry.step")
 gmsh.model.occ.synchronize()
 
@@ -101,61 +103,26 @@ volumes = gmsh.model.getEntities(dim=3)  # [(3, vol_tag), ...]
 surfaces = gmsh.model.getEntities(dim=2)  # [(2, surf_tag), ...]
 ```
 
-### Geometry Creation (OCC kernel)
-```
-# Primitives - return volume tag
-sphere_tag = gmsh.model.occ.addSphere(x, y, z, radius)
-box_tag = gmsh.model.occ.addBox(x, y, z, dx, dy, dz)
-cylinder_tag = gmsh.model.occ.addCylinder(x, y, z, dx, dy, dz, radius)
-cone_tag = gmsh.model.occ.addCone(x, y, z, dx, dy, dz, r1, r2)
-torus_tag = gmsh.model.occ.addTorus(x, y, z, r1, r2)
-wedge_tag = gmsh.model.occ.addWedge(x, y, z, dx, dy, dz)  # triangular prism
-
-# Boolean operations - dimTags format: [(dim, tag), ...]
-gmsh.model.occ.fuse([(3, tag1)], [(3, tag2)])  # union
-gmsh.model.occ.cut([(3, tag1)], [(3, tag2)])   # subtraction
-gmsh.model.occ.intersect([(3, tag1)], [(3, tag2)])
-
-# MUST synchronize after geometry operations
-gmsh.model.occ.synchronize()
-```
-
-### Extrusion Operations
-```
-# Extrude surfaces to create volumes
-# Returns list of (dim, tag) for created entities
-new_entities = gmsh.model.occ.extrude([(2, surf_tag)], dx, dy, dz)
-# new_entities[0] = extruded surface, new_entities[1] = created volume
-
-# Revolve surface around axis (x,y,z) with direction (ax,ay,az)
-new_entities = gmsh.model.occ.revolve([(2, surf_tag)], x, y, z, ax, ay, az, angle)
-
-# Create pipe along wire path
-gmsh.model.occ.addPipe([(2, profile_tag)], wire_tag)
-
-# Loft between multiple wire profiles
-gmsh.model.occ.addThruSections([wire1, wire2, wire3])
-```
-
 ### Physical Groups (required for FEA)
-```
+```python
 # Get entities by dimension: 0=points, 1=curves, 2=surfaces, 3=volumes
 volumes = gmsh.model.getEntities(dim=3)
 surfaces = gmsh.model.getEntities(dim=2)
 
-# Create physical groups
-vol_group = gmsh.model.addPhysicalGroup(3, [tag1, tag2])
-gmsh.model.setPhysicalName(3, vol_group, "material_domain")
+# Create physical groups with meaningful names
+vol_group = gmsh.model.addPhysicalGroup(3, [v[1] for v in volumes])
+gmsh.model.setPhysicalName(3, vol_group, "domain")
 
+# Group specific surfaces by their tags
 surf_group = gmsh.model.addPhysicalGroup(2, [surf_tag])
-gmsh.model.setPhysicalName(2, surf_group, "boundary_condition")
+gmsh.model.setPhysicalName(2, surf_group, "boundary_name")
 ```
 
 ### Mesh Size Fields (Local Refinement)
-```
-# Distance field - refine near entity
+```python
+# Distance field - refine near surfaces
 gmsh.model.mesh.field.add("Distance", 1)
-gmsh.model.mesh.field.setNumbers(1, "SurfacesList", [surf_tag])
+gmsh.model.mesh.field.setNumbers(1, "SurfacesList", [surf_tag1, surf_tag2])
 
 # Threshold field - size based on distance
 gmsh.model.mesh.field.add("Threshold", 2)
@@ -183,132 +150,274 @@ gmsh.model.mesh.field.setAsBackgroundMesh(4)
 ```
 
 ### Transfinite Meshing (Structured Meshes)
-```
+```python
 # Set number of nodes on curves
 gmsh.model.mesh.setTransfiniteCurve(curve_tag, numNodes, meshType="Progression", coef=1.0)
-# meshType: "Progression", "Bump" (refine at ends), "Beta" (refine at one end)
 
 # Set transfinite surface (requires 3 or 4 corner points)
 gmsh.model.mesh.setTransfiniteSurface(surf_tag, arrangement="Left", cornerTags=[p1, p2, p3, p4])
-# arrangement: "Left", "Right", "Alternate"
 
-# Set transfinite volume (requires 6 or 8 corner points for hex)
-gmsh.model.mesh.setTransfiniteVolume(vol_tag, cornerTags=[p1, p2, p3, p4, p5, p6, p7, p8])
-
-# Recombine triangles into quads (required for hex meshing)
-gmsh.model.mesh.setRecombine(2, surf_tag)  # 2D recombine
-gmsh.model.mesh.setRecombine(3, vol_tag)   # 3D recombine for hex elements
-```
-
-### Mesh Algorithms
-```
-# 2D algorithms: 1=MeshAdapt, 2=Auto, 3=Initial mesh only, 5=Delaunay, 6=Frontal-Delaunay
-#                7=BAMG, 8=Frontal-Delaunay for Quads, 9=Packing of Parallelograms, 11=Quasi-Structured Quad
-gmsh.option.setNumber("Mesh.Algorithm", 6)  # Frontal-Delaunay (good quality)
-
-# 3D algorithms: 1=Delaunay, 3=Initial mesh only, 4=Frontal, 7=MMG3D, 10=HXT
-gmsh.option.setNumber("Mesh.Algorithm3D", 1)  # Delaunay
-gmsh.option.setNumber("Mesh.Algorithm3D", 10)  # HXT (fast, parallel)
-
-# Optimization algorithms
-gmsh.option.setNumber("Mesh.OptimizeNetgen", 1)  # Netgen optimizer
-gmsh.option.setNumber("Mesh.Optimize", 1)  # Standard optimization
+# Recombine triangles into quads
+gmsh.model.mesh.setRecombine(2, surf_tag)
 ```
 
 ### Boundary Layer Meshing
-```
-# Create boundary layer field
+```python
 gmsh.model.mesh.field.add("BoundaryLayer", 1)
-gmsh.model.mesh.field.setNumbers(1, "SurfacesList", [surf1, surf2])  # surfaces to extrude from
+gmsh.model.mesh.field.setNumbers(1, "SurfacesList", [surf1, surf2])
 gmsh.model.mesh.field.setNumber(1, "Size", 0.01)       # first layer thickness
 gmsh.model.mesh.field.setNumber(1, "Ratio", 1.2)       # growth ratio
 gmsh.model.mesh.field.setNumber(1, "NbLayers", 10)     # number of layers
-gmsh.model.mesh.field.setNumber(1, "Quads", 1)         # use quads (1) or triangles (0)
+gmsh.model.mesh.field.setNumber(1, "Quads", 1)         # use quads
 gmsh.model.mesh.field.setAsBoundaryLayer(1)
-
-# Alternative: ExtrudeBoundaryLayer for explicit control
-gmsh.model.geo.extrudeBoundaryLayer([(2, surf_tag)], [1, 2, 3], [0.01, 0.02, 0.05], True)
 ```
 
-### Mesh Quality Options
-```
-# Element quality thresholds
-gmsh.option.setNumber("Mesh.QualityType", 2)  # 0=SICN, 1=SIGE, 2=Gamma (default)
-gmsh.option.setNumber("Mesh.OptimizeThreshold", 0.3)  # optimize elements below this quality
+### Mesh Options
+```python
+# Global mesh size
+gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 2.0)
+gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.1)
 
-# Mesh smoothing iterations
+# Mesh from curvature (elements per 2*pi radians)
+gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 20)
+
+# Algorithm selection
+gmsh.option.setNumber("Mesh.Algorithm", 6)      # 2D: Frontal-Delaunay
+gmsh.option.setNumber("Mesh.Algorithm3D", 10)   # 3D: HXT (fast)
+
+# Quality optimization
+gmsh.option.setNumber("Mesh.OptimizeNetgen", 1)
 gmsh.option.setNumber("Mesh.Smoothing", 10)
 
-# High-order mesh options
-gmsh.option.setNumber("Mesh.ElementOrder", 2)  # quadratic elements
-gmsh.option.setNumber("Mesh.HighOrderOptimize", 2)  # optimize high-order mesh
-
-# Mesh size from curvature
-gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 20)  # elements per 2*pi radians
-gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 1)  # extend size from boundary
-
-# Anisotropic mesh options
-gmsh.option.setNumber("Mesh.AnisoMax", 10)  # max anisotropy ratio
-gmsh.option.setNumber("Mesh.SmoothRatio", 1.8)  # smoothing ratio
-```
-
-### Basic Mesh Control
-```
-gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 0.5)
-gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.1)
-gmsh.model.mesh.generate(3)  # 3D mesh
+# Element order
+gmsh.option.setNumber("Mesh.ElementOrder", 1)   # 1=linear, 2=quadratic
 ```
 
 ### Finalization
-```
+```python
+gmsh.model.mesh.generate(3)  # Generate 3D mesh
 gmsh.write("output.msh")
 gmsh.finalize()
 ```
 
-## Example: Cube with refined region near hole
-```
+## Example: Loading STEP file with refinement near cylindrical surfaces
+```python
 import gmsh
 gmsh.initialize()
-gmsh.model.add("refined_cube")
+gmsh.model.add("thermal_mesh")
 
-# Create cube with cylindrical hole
-box = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
-cyl = gmsh.model.occ.addCylinder(5, 5, 0, 0, 0, 10, 2)
-gmsh.model.occ.cut([(3, box)], [(3, cyl)])
+# Load the STEP geometry
+gmsh.model.occ.importShapes("geometries/example_part.step")
 gmsh.model.occ.synchronize()
 
-# Get hole surface for refinement
-surfs = gmsh.model.getEntities(dim=2)
-hole_surfs = [s[1] for s in surfs if gmsh.model.isInside(2, s[1], [5, 5, 5])]
+# Get all entities
+volumes = gmsh.model.getEntities(dim=3)
+surfaces = gmsh.model.getEntities(dim=2)
 
-# Distance field from hole
+# Create physical groups
+vol_group = gmsh.model.addPhysicalGroup(3, [v[1] for v in volumes])
+gmsh.model.setPhysicalName(3, vol_group, "domain")
+
+# Group all surfaces as boundary (or split by surface type if needed)
+all_surf_tags = [s[1] for s in surfaces]
+surf_group = gmsh.model.addPhysicalGroup(2, all_surf_tags)
+gmsh.model.setPhysicalName(2, surf_group, "boundary")
+
+# Distance field for refinement near specific surfaces
 gmsh.model.mesh.field.add("Distance", 1)
-gmsh.model.mesh.field.setNumbers(1, "SurfacesList", hole_surfs if hole_surfs else [surfs[0][1]])
+gmsh.model.mesh.field.setNumbers(1, "SurfacesList", all_surf_tags[:3])  # refine near first 3 surfaces
 
-# Threshold: fine near hole, coarse away
+# Threshold field
 gmsh.model.mesh.field.add("Threshold", 2)
 gmsh.model.mesh.field.setNumber(2, "InField", 1)
-gmsh.model.mesh.field.setNumber(2, "SizeMin", 0.3)
+gmsh.model.mesh.field.setNumber(2, "SizeMin", 0.5)
 gmsh.model.mesh.field.setNumber(2, "SizeMax", 2.0)
 gmsh.model.mesh.field.setNumber(2, "DistMin", 0.5)
-gmsh.model.mesh.field.setNumber(2, "DistMax", 3.0)
+gmsh.model.mesh.field.setNumber(2, "DistMax", 5.0)
 gmsh.model.mesh.field.setAsBackgroundMesh(2)
 
-# Physical groups
-vols = gmsh.model.getEntities(dim=3)
-surfs = gmsh.model.getEntities(dim=2)
-gmsh.model.addPhysicalGroup(3, [v[1] for v in vols], name="domain")
-gmsh.model.addPhysicalGroup(2, [s[1] for s in surfs], name="boundary")
-
-# Quality meshing
-gmsh.option.setNumber("Mesh.Algorithm3D", 10)  # HXT
+# Global mesh settings
+gmsh.option.setNumber("Mesh.Algorithm3D", 10)
 gmsh.option.setNumber("Mesh.OptimizeNetgen", 1)
+
+# Generate mesh
 gmsh.model.mesh.generate(3)
 gmsh.write("output.msh")
 gmsh.finalize()
 ```
 
 Wrap your code in ```python ... ``` blocks."""
+
+# ---------------------------- GPU Idle Worker ------------------- #
+stop_event = threading.Event()
+pause_event = threading.Event()
+
+def gpu_idle_worker():
+    print('[idle_worker] GPU idle worker started.')
+    running = True
+    while not stop_event.is_set():
+        if pause_event.is_set():
+            if running:
+                running = False
+            time.sleep(0.1)
+            continue
+        else:
+            if not running:
+                running = True
+        try:
+            a = torch.rand((2000, 2000), dtype=torch.float32, device='cuda')
+            b = torch.rand((2000, 2000), dtype=torch.float32, device='cuda')
+            torch.matmul(a, b)
+            torch.cuda.synchronize()
+        except RuntimeError:
+            time.sleep(1)
+    print('[idle_worker] GPU idle worker stopped.')
+
+idle_thread = threading.Thread(target=gpu_idle_worker, daemon=True)
+idle_thread.start()
+
+# ---------------------------- Gmsh Execution ----------------------- #
+
+def execute_gmsh_script(code: str, timeout: int = 120):
+    """
+    Execute Gmsh script in isolated environment and analyze results.
+
+    Returns:
+        {
+            "status": "success" | "error",
+            "mesh_generated": bool,
+            "execution_time": float,
+            "mesh_stats": {...},
+            "stdout": str,
+            "stderr": str
+        }
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            script_path = os.path.join(tmpdir, "mesh_script.py")
+            output_mesh = os.path.join(tmpdir, "output.msh")
+
+            # Ensure script saves to our output path
+            if "gmsh.write(" not in code:
+                code = code.replace("gmsh.finalize()", f'gmsh.write("{output_mesh}")\ngmsh.finalize()')
+            else:
+                code = re.sub(r'gmsh\.write\(["\'].*?["\']\)', f'gmsh.write("{output_mesh}")', code)
+
+            with open(script_path, 'w') as f:
+                f.write(code)
+
+            # Execute with timeout
+            start_time = time.time()
+            result = subprocess.run(
+                ['python', script_path],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            execution_time = time.time() - start_time
+
+            # Check if mesh was generated
+            if os.path.exists(output_mesh):
+                mesh_stats = analyze_mesh(output_mesh)
+                return {
+                    "status": "success",
+                    "mesh_generated": True,
+                    "execution_time": execution_time,
+                    "mesh_stats": mesh_stats,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr
+                }
+            else:
+                return {
+                    "status": "error",
+                    "mesh_generated": False,
+                    "execution_time": execution_time,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "error": "No mesh file generated"
+                }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "status": "error",
+                "mesh_generated": False,
+                "error": "Execution timeout"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "mesh_generated": False,
+                "error": str(e)
+            }
+
+
+def analyze_mesh(mesh_file: str):
+    """
+    Analyze generated mesh and extract quality metrics.
+
+    Runs in a subprocess to avoid signal issues with gmsh in threaded Flask.
+    """
+    print(f"[analyze_mesh] Opening mesh file: {mesh_file}", flush=True)
+
+    # Create a small script to analyze the mesh in a subprocess
+    analysis_script = f'''
+import json
+import sys
+import numpy as np
+
+try:
+    import gmsh
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.open("{mesh_file}")
+
+    stats = {{
+        "num_nodes": 0,
+        "num_elements": 0,
+        "num_physical_groups": 0,
+        "element_types": {{}},
+        "quality_min": 0.0,
+        "quality_mean": 0.0
+    }}
+
+    # Count nodes
+    node_tags, _, _ = gmsh.model.mesh.getNodes()
+    stats["num_nodes"] = len(node_tags)
+
+    # Count elements
+    elem_types = gmsh.model.mesh.getElementTypes()
+    total_elements = 0
+    for elem_type in elem_types:
+        elem_tags, _ = gmsh.model.mesh.getElementsByType(elem_type)
+        count = len(elem_tags)
+        total_elements += count
+        stats["element_types"][str(elem_type)] = count
+
+    stats["num_elements"] = total_elements
+
+    # Count physical groups
+    for dim in range(4):
+        groups = gmsh.model.getPhysicalGroups(dim)
+        stats["num_physical_groups"] += len(groups)
+
+    # Quality metrics (for tetrahedra, type 4)
+    if 4 in elem_types:
+        try:
+            tet_tags, _ = gmsh.model.mesh.getElementsByType(4)
+            if len(tet_tags) > 0:
+                qualities = gmsh.model.mesh.getElementQualities(tet_tags, "minSICN")
+                if len(qualities) > 0:
+                    stats["quality_min"] = float(np.min(qualities))
+                    stats["quality_mean"] = float(np.mean(qualities))
+        except:
+            pass
+
+    gmsh.finalize()
+    print(json.dumps(stats))
+except Exception as e:
+    print(json.dumps({{"num_nodes": 0, "num_elements": 0, "num_physical_groups": 0, "error": str(e)}}))
+'''
 
 # System prompt for distillation mode (with teacher solutions)
 GMSH_DISTILLATION_PROMPT = """You are an expert in computational meshing using Gmsh.

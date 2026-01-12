@@ -9,6 +9,7 @@
 #   bash scripts/gmsh_curriculum_train.sh Qwen/Qwen3-4B-Base qwen3_4b_gmsh_curriculum_v1
 #
 
+
 set -e
 
 project_name=gmsh_curriculum

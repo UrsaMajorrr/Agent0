@@ -54,23 +54,37 @@ def format_geometry_for_prompt(geom_meta: dict) -> str:
         type_counts[surf_type] = type_counts.get(surf_type, 0) + 1
     type_summary = ", ".join([f"{count} {t}" for t, count in sorted(type_counts.items())])
 
-    return (
+    # Small features info
+    small_features = geom_meta.get("small_features", {})
+    small_feature_count = small_features.get("count", 0)
+    small_feature_ids = small_features.get("surface_ids", [])
+
+    result = (
         f"**GEOMETRY FILE:** {filename}\n"
         f"**GEOMETRY PATH:** {filepath}\n"
         f"**TOPOLOGY:** {geom_meta['surfaces']} surfaces, {geom_meta['volumes']} volume(s), "
         f"{geom_meta['points']} points, {geom_meta['curves']} curves\n"
-        f"**SURFACE TYPES:** {type_summary}\n\n"
-        f"To load this geometry in Gmsh:\n"
+        f"**SURFACE TYPES:** {type_summary}\n"
+    )
+
+    if small_feature_count > 0:
+        result += f"**SMALL FEATURES:** {small_feature_count} surfaces with bounding box <= 5% of overall size (surface IDs: {small_feature_ids})\n"
+
+    result += (
+        f"\nTo load this geometry in Gmsh:\n"
         f"```python\n"
         f"gmsh.model.occ.importShapes(\"{filepath}\")\n"
         f"gmsh.model.occ.synchronize()\n"
         f"```"
     )
 
+    return result
+
 # Same prompt used during training (gmsh_format in dataset.py)
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_TEMPLATE = (
     "You are a curriculum designer for Gmsh meshing training.\n\n"
     "You will be given a STEP geometry file. Your job is to create a challenging meshing task for this geometry.\n\n"
+    "IMPORTANT: Your task MUST load the geometry from: {geometry_path}\n\n"
     "Your task MUST specify:\n"
     "1. The structural FEA analysis type (e.g. static, dynamic, thermal, modal, buckling, fatigue)\n"
     "2. Physical groups with meaningful names based on the geometry's surfaces\n"
@@ -79,17 +93,18 @@ SYSTEM_PROMPT = (
     "3. Mesh size requirements:\n"
     "   - Global mesh size\n"
     "   - Local refinement near curved surfaces, small features, or boundary layers\n"
+    "   - If SMALL FEATURES are listed in the geometry info, you MUST specify mesh refinement around those surfaces\n"
     "   - Use mesh size fields (Distance, Threshold, Box) for advanced refinement\n"
     "4. Mesh quality requirements if applicable (element order, optimization)\n\n"
     "DIFFICULTY LEVELS to vary:\n"
     "- BASIC: Simple mesh with uniform size, 2-3 physical groups\n"
     "- INTERMEDIATE: Multiple physical groups, local refinement near one region\n"
-    "- ADVANCED: Boundary layers, multiple refinement zones, transfinite meshing\n"
+    "- ADVANCED: Boundary layers, multiple refinement zones, transfinite meshing, varying between quad elements on some surfaces and tetrahedral surfaces on others.\n"
     "- EXPERT: Anisotropic mesh, curvature-based sizing, structured regions\n\n"
     "Output exactly:\n"
-    "<task>[complete meshing task description including the geometry path]</task>\n\n"
+    "<task>[complete meshing task description starting with loading {geometry_path}]</task>\n\n"
     "Example:\n"
-    "<task>Load the geometry from [path]. Mesh it for thermal analysis. Create physical groups: 'heat_source' for the cylindrical surfaces (apply heat flux), 'convection_surfaces' for planar faces (convective cooling), 'volume' for the solid domain. Use global element size 2.0 with refinement to 0.5 near cylindrical surfaces using a Distance field.</task>"
+    "<task>Load the geometry from {geometry_path}. Mesh it for thermal analysis. Create physical groups: 'heat_source' for the cylindrical surfaces (apply heat flux), 'convection_surfaces' for planar faces (convective cooling), 'volume' for the solid domain. Use global element size 2.0 with refinement to 0.5 near cylindrical surfaces using a Distance field.</task>"
 )
 
 USER_PROMPT_TEMPLATE = "Create a meshing task for this geometry:\n\n{geometry_context}"
@@ -130,14 +145,17 @@ def main(args):
         if geometry_metadata:
             geom_meta = random.choice(geometry_metadata)
             geometry_context = format_geometry_for_prompt(geom_meta)
+            geometry_path = "geometries/" + os.path.basename(geom_meta.get("file", "unknown"))
             geometry_info.append(geom_meta.get("file", "unknown"))
         else:
             geometry_context = "No geometry available. Create your own simple geometry."
+            geometry_path = "geometries/unknown.step"
             geometry_info.append(None)
 
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(geometry_path=geometry_path)
         user_prompt = USER_PROMPT_TEMPLATE.format(geometry_context=geometry_context)
         chat = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 
@@ -149,7 +167,7 @@ def main(args):
                 add_special_tokens=True
             )
         else:
-            prompt = "system: " + SYSTEM_PROMPT + '\n' + "user: " + user_prompt
+            prompt = "system: " + system_prompt + '\n' + "user: " + user_prompt
 
         prompts.append(prompt)
 

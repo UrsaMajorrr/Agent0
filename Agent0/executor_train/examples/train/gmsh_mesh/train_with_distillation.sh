@@ -13,36 +13,7 @@ set -x
 
 
 # Input curriculum tasks (from curriculum training)
-curriculum_tasks="${1:-$STORAGE_PATH/generated_question/qwen3_4b_executor_iter2/train.parquet}"
-
-# Output paths
-teacher_solutions_dir="$STORAGE_PATH/generated_question/gmsh_distillation"
-teacher_solutions_path="$teacher_solutions_dir/teacher_solutions.parquet"
-
-# Step 1: Generate teacher solutions using GPT-5.2
-# NOTE: Uses curriculum environment which has gmsh with OpenGL dependencies
-echo "=== Step 1: Generating teacher solutions with GPT-5.2 ==="
-
-mkdir -p "$teacher_solutions_dir"
-
-# Switch to curriculum env for gmsh validation
-# source ~/miniconda3/etc/profile.d/conda.sh
-# conda activate curriculum
-
-# python /home/kade/Agent0_backup/Agent0/curriculum_train/generate_teacher_solutions.py \
-#     --input_path "$curriculum_tasks" \
-#     --output_path "$teacher_solutions_path" \
-#     --model gpt-5.2 \
-#     --max_workers 1 \
-#     --task_key task
-
-# if [ $? -ne 0 ]; then
-#     echo "Error: Teacher solution generation failed"
-#     exit 1
-# fi
-
-echo "Teacher solutions saved to: $teacher_solutions_path"
-
+curriculum_tasks="${1:-$STORAGE_PATH/generated_question/qwen3_4b_executor_iter3/train.parquet}"
 
 # Step 2: Train executor with distillation
 # Switch to executor env for training
@@ -61,8 +32,8 @@ n_nodes=1
 
 # Sampling configuration
 n=16
-batch_size=32
-ppo_mini_batch_size=32
+batch_size=16
+ppo_mini_batch_size=16
 max_prompt_length=4096      # Increased for teacher solution in prompt
 max_response_length=4096
 max_obs_length=20000
@@ -152,6 +123,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.optim.lr=$lr \
+    actor_rollout_ref.actor.ppo_epochs=4 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.trust_remote_code=True \

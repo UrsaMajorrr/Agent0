@@ -6,3 +6,4 @@
 *.gmsh
 *.dia
 *.ans
+*.out

@@ -79,7 +79,7 @@ kl_loss_coef: 0.001
 kl_loss_type: low_var_kl
 
 # Number of PPO epochs per batch
-ppo_epochs: 1
+ppo_epochs: 4
 
 # Shuffle training data across PPO epochs
 shuffle: false

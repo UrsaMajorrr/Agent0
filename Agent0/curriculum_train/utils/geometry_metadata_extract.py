@@ -42,9 +42,17 @@ def extract_geometry_metadata(step_file_path: str) -> dict:
                    metadata["overall_bbox"]["depth"]) / 3.0
     metadata["characteristic_length"] = char_length
 
+    # Overall characteristic size (max dimension) for small feature detection
+    overall_char_size = max(
+        metadata["overall_bbox"]["width"],
+        metadata["overall_bbox"]["height"],
+        metadata["overall_bbox"]["depth"]
+    )
+
     # Classify surfaces and collect sizes
     surface_sizes = []
     surface_type_counts = {}
+    small_feature_ids = []  # Track surfaces with bbox <= 5% of overall bbox
 
     for surf in surfaces:
         # Get entity type using correct Gmsh API
@@ -59,6 +67,10 @@ def extract_geometry_metadata(step_file_path: str) -> dict:
         depth = bbox[5] - bbox[2]
         char_size = max(width, height, depth)  # Largest dimension
         surface_sizes.append(char_size)
+
+        # Check if this is a small feature (bbox <= 5% of overall bbox)
+        if overall_char_size > 0 and (char_size / overall_char_size) <= 0.05:
+            small_feature_ids.append(surf[1])
 
         # Count entity types
         surface_type_counts[entity_type] = surface_type_counts.get(entity_type, 0) + 1
@@ -107,6 +119,12 @@ def extract_geometry_metadata(step_file_path: str) -> dict:
     # Entity type distributions
     metadata["surface_type_distribution"] = surface_type_counts
     metadata["curve_type_distribution"] = curve_type_counts
+
+    # Small features (surfaces with bbox <= 5% of overall bbox)
+    metadata["small_features"] = {
+        "count": len(small_feature_ids),
+        "surface_ids": small_feature_ids
+    }
 
     # Multi-scale ratio (indicates if geometry has features at very different scales)
     if surface_sizes and len(surface_sizes) > 1:

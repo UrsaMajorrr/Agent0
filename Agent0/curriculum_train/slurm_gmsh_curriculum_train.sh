@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --gpus=8
 #SBATCH --mem=512G
-#SBATCH --time=48:00:00
+#SBATCH --time=96:00:00
 
 # Adjust these for your cluster:
 # - Change partition name if needed
@@ -20,7 +20,7 @@
 # Set environment variables
 export STORAGE_PATH="/home/kade/Agent0_backup/Agent0/fea_experiments"  # TODO: Fill this in
 
-executor=/home/kade/Agent0_backup/Agent0/executor_train/checkpoints/gmsh_distillation/gmsh_rl_20251231_222750/global_step_40/actor/huggingface
+executor=/home/kade/Agent0_backup/Agent0/executor_train/checkpoints/gmsh_distillation/gmsh_rl_20260108_164601/global_step_440/actor/huggingface
 
 # Ensure required directories exist
 mkdir -p \
@@ -40,6 +40,6 @@ echo "Conda env: $CONDA_DEFAULT_ENV"
 # Navigate to working directory
 cd /home/kade/Agent0_backup/Agent0/curriculum_train
 
-bash scripts/gmsh_curriculum_train.sh ${STORAGE_PATH}/models/qwen3_4b_curriculum_v1/global_step_1006/actor/huggingface qwen3_4b_curriculum_iter2 $executor
+bash scripts/gmsh_curriculum_train.sh $STORAGE_PATH/models/qwen3_4b_curriculum_iter3/global_step_1006/actor/huggingface qwen3_4b_curriculum_iter4 $executor
 
 echo "Training completed at $(date)"
